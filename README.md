@@ -138,6 +138,6 @@ rlwrap nc -nlvp 4444
 | XMPP Enumeration     | Pidgin                        | Found svc\_openfire credentials |
 | Lateral Movement     | BloodHound (DCOM)             | Executed shell on DC            |
 | Privilege Escalation | Openfire RCE (CVE-2023-32315) | Gained SYSTEM shell             |
-| Flags Captured       | User & Root                   | ✅ Complete compromise           |
+| Flags Captured       | User & Root                   | Complete compromise             |
 
 Author: Farhanahmad Quraishi
